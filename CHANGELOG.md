@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Changed
+
+- **Git installs use `build/<sha>` tags.** For every commit pushed to
+  `main`, CI builds it and pushes a `build/<12-char SHA>` tag on a commit
+  that adds `build/` on top of it. Pin one of those tags to install from
+  git; no lifecycle script has to run, so it works where install-time
+  scripts don't (e.g. Bazel `rules_js`, which skips `prepare`). `main`
+  itself no longer installs from git: the `prepare` script is gone and
+  `prepublishOnly` builds before publishing.
+
 ### Fixed
 
 - **iOS: widths for text with `letterSpacing: 0` were narrower than what RN

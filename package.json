@@ -62,8 +62,7 @@
     "snapshot:update": "bun --preload ./src/__tests__/setup-mocks.ts scripts/snapshot.ts update",
     "build:web": "cd example && npx expo export --platform web --output-dir dist",
     "deploy:web": "npm run build:web && cd example/dist && vercel deploy --prod --yes",
-    "prepare": "tsc -p tsconfig.build.json",
-    "prepublishOnly": "bun test src/__tests__/"
+    "prepublishOnly": "npm run build && bun test src/__tests__/"
   },
   "engines": {
     "node": ">=18.0.0"
