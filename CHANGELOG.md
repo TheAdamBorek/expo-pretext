@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **iOS: widths for text with `letterSpacing: 0` were narrower than what RN
+  draws.** RN passes any `letterSpacing` that is set, including `0`, to
+  UIKit as an `NSKern` attribute, and an `NSKern` of exactly 0 turns off the
+  font's pair kerning (non-zero values keep it). The iOS native module never
+  looked at `letterSpacing` and always measured with kerning on, so kerning
+  pairs such as "AV" and "Wa" made the prediction narrower than the drawn
+  text. Segment widths for `letterSpacing: 0` are now measured without
+  kerning; JS still adds non-zero spacing per code point, once.
+  `measureHeights()` (TextKit) and the ink measurements, which don't go
+  through that JS step and ignored `letterSpacing` entirely, now measure
+  with `NSKern` set to `letterSpacing`, as RN renders. With `letterSpacing`
+  unset, nothing changes.
+- The JS width cache keyed unset `letterSpacing` and `0` the same way;
+  they now get separate keys.
+- `measureHeights()` pre-warmed the JS width cache without adding
+  `letterSpacing`, so a later `accuracy: 'exact'` prepare could reuse widths
+  that were missing it.
+
 ## 1.2.0 — 2026-08-10 — Android hotfix + measurement parity
 
 Supersedes 1.1.1, which was committed but never tagged or published; its

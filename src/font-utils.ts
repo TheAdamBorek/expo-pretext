@@ -46,8 +46,10 @@ export function getFontKey(style: TextStyle): string {
   const weight = style.fontWeight ?? '400'
   const fStyle = style.fontStyle ?? 'normal'
   const family = resolveFontFamily(style.fontFamily)
-  const ls = style.letterSpacing ?? 0
-  return `${family}_${style.fontSize}_${weight}_${fStyle}_${ls}`
+  // Unset and 0 must not share a key: on iOS letterSpacing 0 turns off pair
+  // kerning, so the two measure differently.
+  const ls = style.letterSpacing === undefined ? '' : `_ls${style.letterSpacing}`
+  return `${family}_${style.fontSize}_${weight}_${fStyle}${ls}`
 }
 
 export function getLineHeight(style: TextStyle): number {
@@ -79,6 +81,10 @@ export function codePointCount(s: string): number {
  * the last one on a line (visible as trailing space), so we distribute it
  * across all code points uniformly. The line-breaking engine tolerates
  * the trailing-letterSpacing overhang via `lineFitEpsilon`.
+ *
+ * This is the only place segment widths get `letterSpacing`. The iOS native
+ * module never adds it to segment widths. For `letterSpacing: 0` it measures
+ * them without pair kerning, because UIKit draws RN text that way.
  *
  * No-op when `letterSpacing` is 0 or undefined — the common case.
  */
