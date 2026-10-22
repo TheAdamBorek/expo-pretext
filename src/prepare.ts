@@ -269,6 +269,7 @@ export function measureHeights(
     const fontKey = getFontKey(style)
     const batchResults = native.batchSegmentAndMeasure(texts, font)
     for (const result of batchResults) {
+      applyLetterSpacingInPlace(result.widths, result.segments, style.letterSpacing)
       cacheNativeResult(fontKey, result.segments, result.widths)
     }
   } catch {

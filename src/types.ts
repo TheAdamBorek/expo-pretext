@@ -28,6 +28,11 @@ export type TextStyle = {
    * segment widths during layout so wrapping and height prediction stay
    * accurate. A cache-key component — different values produce
    * independent measurements.
+   *
+   * On iOS, `0` is not the same as leaving it unset: RN passes any set value
+   * to UIKit as `NSKern`, and an `NSKern` of 0 turns off the font's pair
+   * kerning, so the text usually renders wider. Other values keep pair
+   * kerning.
    */
   letterSpacing?: number
 }

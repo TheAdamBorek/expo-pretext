@@ -72,7 +72,7 @@ public class ExpoPretext: Module {
   // Font cache: "family_size_weight_style" -> UIFont
   private var fontCache: [String: UIFont] = [:]
 
-  // Measure cache: fontKey -> (segmentText -> CacheEntry)
+  // Measure cache: measureKey -> (segmentText -> CacheEntry)
   private var measureCache: [String: [String: CacheEntry]] = [:]
 
   // Max segments per font before LRU eviction
@@ -108,34 +108,34 @@ public class ExpoPretext: Module {
 
     // segmentAndMeasure(text, font, options?) -> { segments, isWordLike, widths }
     Function("segmentAndMeasure") { (text: String, fontDesc: [String: Any], options: [String: Any]?) -> [String: Any] in
-      let font = self.resolveFont(fontDesc)
-      let fontKey = self.fontKey(fontDesc)
+      let attributes = self.segmentAttributes(font: self.resolveFont(fontDesc), desc: fontDesc)
+      let measureKey = self.measureKey(fontDesc)
       let whiteSpace = (options?["whiteSpace"] as? String) ?? "normal"
       let locale = options?["locale"] as? String
-      return self.performSegmentAndMeasure(text: text, font: font, fontKey: fontKey, whiteSpace: whiteSpace, locale: locale)
+      return self.performSegmentAndMeasure(text: text, attributes: attributes, measureKey: measureKey, whiteSpace: whiteSpace, locale: locale)
     }
 
     // batchSegmentAndMeasure(texts, font, options?) -> [{ segments, isWordLike, widths }]
     Function("batchSegmentAndMeasure") { (texts: [String], fontDesc: [String: Any], options: [String: Any]?) -> [[String: Any]] in
-      let font = self.resolveFont(fontDesc)
-      let fontKey = self.fontKey(fontDesc)
+      let attributes = self.segmentAttributes(font: self.resolveFont(fontDesc), desc: fontDesc)
+      let measureKey = self.measureKey(fontDesc)
       let whiteSpace = (options?["whiteSpace"] as? String) ?? "normal"
       let locale = options?["locale"] as? String
       return texts.map { text in
-        self.performSegmentAndMeasure(text: text, font: font, fontKey: fontKey, whiteSpace: whiteSpace, locale: locale)
+        self.performSegmentAndMeasure(text: text, attributes: attributes, measureKey: measureKey, whiteSpace: whiteSpace, locale: locale)
       }
     }
 
     // measureGraphemeWidths(segment, font) -> [Double]
     Function("measureGraphemeWidths") { (segment: String, fontDesc: [String: Any]) -> [Double] in
-      let font = self.resolveFont(fontDesc)
+      let attributes = self.segmentAttributes(font: self.resolveFont(fontDesc), desc: fontDesc)
       var widths: [Double] = []
       var index = segment.startIndex
       while index < segment.endIndex {
         let nextIndex = segment.index(after: index)
         // Walk to next grapheme cluster boundary
         let grapheme = String(segment[index..<nextIndex])
-        let attrStr = NSAttributedString(string: grapheme, attributes: [.font: font])
+        let attrStr = NSAttributedString(string: grapheme, attributes: attributes)
         let ctLine = CTLineCreateWithAttributedString(attrStr)
         widths.append(Double(CTLineGetTypographicBounds(ctLine, nil, nil, nil)))
         index = nextIndex
@@ -145,9 +145,9 @@ public class ExpoPretext: Module {
 
     // remeasureMerged(segments, font) -> [Double]
     Function("remeasureMerged") { (segments: [String], fontDesc: [String: Any]) -> [Double] in
-      let font = self.resolveFont(fontDesc)
+      let attributes = self.segmentAttributes(font: self.resolveFont(fontDesc), desc: fontDesc)
       return segments.map { segment in
-        let attrStr = NSAttributedString(string: segment, attributes: [.font: font])
+        let attrStr = NSAttributedString(string: segment, attributes: attributes)
         let ctLine = CTLineCreateWithAttributedString(attrStr)
         return Double(CTLineGetTypographicBounds(ctLine, nil, nil, nil))
       }
@@ -156,11 +156,11 @@ public class ExpoPretext: Module {
     // segmentAndMeasureAsync(text, font, options?) -> Promise<{ segments, isWordLike, widths }>
     AsyncFunction("segmentAndMeasureAsync") { (text: String, fontDesc: [String: Any], options: [String: Any]?, promise: Promise) in
       DispatchQueue.global(qos: .userInitiated).async {
-        let font = self.resolveFont(fontDesc)
-        let fontKey = self.fontKey(fontDesc)
+        let attributes = self.segmentAttributes(font: self.resolveFont(fontDesc), desc: fontDesc)
+        let measureKey = self.measureKey(fontDesc)
         let whiteSpace = (options?["whiteSpace"] as? String) ?? "normal"
         let locale = options?["locale"] as? String
-        let result = self.performSegmentAndMeasure(text: text, font: font, fontKey: fontKey, whiteSpace: whiteSpace, locale: locale)
+        let result = self.performSegmentAndMeasure(text: text, attributes: attributes, measureKey: measureKey, whiteSpace: whiteSpace, locale: locale)
         promise.resolve(result)
       }
     }
@@ -185,8 +185,8 @@ public class ExpoPretext: Module {
     Function("measureInkWidth") { (text: String, fontDesc: [String: Any]) -> Double in
       if text.isEmpty { return 0 }
       let font = self.resolveFont(fontDesc)
-      let fontKey = self.fontKey(fontDesc)
-      return self.cachedInkMeasure(segment: text, font: font, fontKey: fontKey).width
+      let attributes = self.renderAttributes(font: font, desc: fontDesc)
+      return self.cachedInkMeasure(segment: text, font: font, attributes: attributes, measureKey: self.measureKey(fontDesc)).width
     }
 
     Function("measureInkBounds") { (text: String, fontDesc: [String: Any]) -> [String: Any] in
@@ -201,8 +201,8 @@ public class ExpoPretext: Module {
         ]
       }
       let font = self.resolveFont(fontDesc)
-      let fontKey = self.fontKey(fontDesc)
-      return self.cachedInkMeasure(segment: text, font: font, fontKey: fontKey).dictionary()
+      let attributes = self.renderAttributes(font: font, desc: fontDesc)
+      return self.cachedInkMeasure(segment: text, font: font, attributes: attributes, measureKey: self.measureKey(fontDesc)).dictionary()
     }
 
     // measureInkSafe(text, font) -> { inkBounds + advance + metrics }
@@ -218,10 +218,10 @@ public class ExpoPretext: Module {
         ]
       }
       let font = self.resolveFont(fontDesc)
-      let fontKey = self.fontKey(fontDesc)
-      let bounds = self.cachedInkMeasure(segment: text, font: font, fontKey: fontKey)
+      let attributes = self.renderAttributes(font: font, desc: fontDesc)
+      let bounds = self.cachedInkMeasure(segment: text, font: font, attributes: attributes, measureKey: self.measureKey(fontDesc))
 
-      let attrStr = NSAttributedString(string: text, attributes: [.font: font])
+      let attrStr = NSAttributedString(string: text, attributes: attributes)
       let ctLine = CTLineCreateWithAttributedString(attrStr)
       let advance = Double(CTLineGetTypographicBounds(ctLine, nil, nil, nil))
 
@@ -240,7 +240,8 @@ public class ExpoPretext: Module {
 
     Function("measureInkDebug") { (text: String, fontDesc: [String: Any]) -> [String: Any] in
       let font = self.resolveFont(fontDesc)
-      return self.measureInkDebugValue(segment: text, font: font, requestedFontDesc: fontDesc).dictionary()
+      let attributes = self.renderAttributes(font: font, desc: fontDesc)
+      return self.measureInkDebugValue(segment: text, font: font, attributes: attributes, requestedFontDesc: fontDesc).dictionary()
     }
 
     Function("logDebugMessage") { (message: String) in
@@ -267,15 +268,14 @@ public class ExpoPretext: Module {
       (text: String, fontDesc: [String: Any], maxWidth: Double, lineHeight: Double) -> [String: Any] in
       let font = self.resolveFont(fontDesc)
 
-      let textStorage = NSTextStorage(string: text, attributes: [
-        .font: font,
-        .paragraphStyle: {
-          let ps = NSMutableParagraphStyle()
-          ps.minimumLineHeight = CGFloat(lineHeight)
-          ps.maximumLineHeight = CGFloat(lineHeight)
-          return ps
-        }()
-      ])
+      var attributes = self.renderAttributes(font: font, desc: fontDesc)
+      attributes[.paragraphStyle] = {
+        let ps = NSMutableParagraphStyle()
+        ps.minimumLineHeight = CGFloat(lineHeight)
+        ps.maximumLineHeight = CGFloat(lineHeight)
+        return ps
+      }()
+      let textStorage = NSTextStorage(string: text, attributes: attributes)
 
       let layoutManager = NSLayoutManager()
       let textContainer = NSTextContainer(size: CGSize(
@@ -343,33 +343,39 @@ public class ExpoPretext: Module {
 
   // MARK: - Ink-bounds measurement
 
-  // Ink-bounds cache: fontKey -> (text -> (width, hits))
+  // Ink-bounds cache: measureKey -> (text -> (width, hits))
   private var inkResultCache: [String: [String: InkBoundsCacheEntry]] = [:]
 
-  private func cachedInkMeasure(segment: String, font: UIFont, fontKey: String) -> InkBoundsValue {
-    if var perFont = inkResultCache[fontKey], var entry = perFont[segment] {
+  private func cachedInkMeasure(
+    segment: String,
+    font: UIFont,
+    attributes: [NSAttributedString.Key: Any],
+    measureKey: String
+  ) -> InkBoundsValue {
+    if var perFont = inkResultCache[measureKey], var entry = perFont[segment] {
       entry.hits += 1
       perFont[segment] = entry
-      inkResultCache[fontKey] = perFont
+      inkResultCache[measureKey] = perFont
       return entry.bounds
     }
 
-    let measured = self.measureInkBoundsValue(segment: segment, font: font)
+    let measured = self.measureInkBoundsValue(segment: segment, font: font, attributes: attributes)
 
-    var perFont = inkResultCache[fontKey] ?? [:]
+    var perFont = inkResultCache[measureKey] ?? [:]
     if perFont.count >= maxCacheSize {
       if let victim = perFont.min(by: { $0.value.hits < $1.value.hits })?.key {
         perFont.removeValue(forKey: victim)
       }
     }
     perFont[segment] = InkBoundsCacheEntry(bounds: measured, hits: 1)
-    inkResultCache[fontKey] = perFont
+    inkResultCache[measureKey] = perFont
     return measured
   }
 
   private func measureInkDebugValue(
     segment: String,
     font: UIFont,
+    attributes: [NSAttributedString.Key: Any],
     requestedFontDesc: [String: Any]
   ) -> InkMeasurementDebugValue {
     if segment.isEmpty {
@@ -403,7 +409,7 @@ public class ExpoPretext: Module {
       )
     }
 
-    let attrStr = NSAttributedString(string: segment, attributes: [.font: font])
+    let attrStr = NSAttributedString(string: segment, attributes: attributes)
     let ctLine = CTLineCreateWithAttributedString(attrStr)
 
     var ascent: CGFloat = 0
@@ -455,7 +461,7 @@ public class ExpoPretext: Module {
       )
     }
 
-    let vectorBounds = self.measureVectorInkBoundsValue(segment: segment, font: font)
+    let vectorBounds = self.measureVectorInkBoundsValue(segment: segment, font: font, attributes: attributes)
     let advanceFallback = advance > 0 ? self.advanceFallbackBounds(advance: advance, font: font) : nil
     let finalBounds: InkBoundsValue
     let source: String
@@ -500,8 +506,12 @@ public class ExpoPretext: Module {
     )
   }
 
-  private func measureInkBoundsValue(segment: String, font: UIFont) -> InkBoundsValue {
-    let attrStr = NSAttributedString(string: segment, attributes: [.font: font])
+  private func measureInkBoundsValue(
+    segment: String,
+    font: UIFont,
+    attributes: [NSAttributedString.Key: Any]
+  ) -> InkBoundsValue {
+    let attrStr = NSAttributedString(string: segment, attributes: attributes)
     let ctLine = CTLineCreateWithAttributedString(attrStr)
 
     var ascent: CGFloat = 0
@@ -556,7 +566,7 @@ public class ExpoPretext: Module {
       }
     }
 
-    return self.measureVectorInkBoundsValue(segment: segment, font: font)
+    return self.measureVectorInkBoundsValue(segment: segment, font: font, attributes: attributes)
   }
 
   private func advanceFallbackBounds(advance: Double, font: UIFont) -> InkBoundsValue {
@@ -628,8 +638,12 @@ public class ExpoPretext: Module {
     )
   }
 
-  private func measureVectorInkBoundsValue(segment: String, font: UIFont) -> InkBoundsValue {
-    let attrStr = NSAttributedString(string: segment, attributes: [.font: font])
+  private func measureVectorInkBoundsValue(
+    segment: String,
+    font: UIFont,
+    attributes: [NSAttributedString.Key: Any]
+  ) -> InkBoundsValue {
+    let attrStr = NSAttributedString(string: segment, attributes: attributes)
     let ctLine = CTLineCreateWithAttributedString(attrStr)
     let runs = CTLineGetGlyphRuns(ctLine) as! [CTRun]
 
@@ -705,6 +719,40 @@ public class ExpoPretext: Module {
     let weight = (desc["fontWeight"] as? String) ?? "400"
     let style = (desc["fontStyle"] as? String) ?? "normal"
     return "\(family)_\(size)_\(weight)_\(style)"
+  }
+
+  /// The descriptor's letterSpacing, or nil when the style leaves it unset.
+  /// JS only sends the key when the style sets it, and RN only adds NSKern in
+  /// that case (`!isnan(letterSpacing)` in RCTAttributedTextUtils.mm).
+  private func letterSpacing(_ desc: [String: Any]) -> Double? {
+    guard let value = (desc["letterSpacing"] as? NSNumber)?.doubleValue, !value.isNaN else {
+      return nil
+    }
+    return value
+  }
+
+  /// Cache key for measurements. letterSpacing is part of it because it can
+  /// change kerning and advances; `fontKey` alone is enough for the UIFont cache.
+  private func measureKey(_ desc: [String: Any]) -> String {
+    guard let ls = letterSpacing(desc) else { return fontKey(desc) }
+    return "\(fontKey(desc))_ls\(ls)"
+  }
+
+  /// Attributes for segment widths. JS adds letterSpacing to these widths, so
+  /// they must not include it. RN passes any set letterSpacing to UIKit as
+  /// NSKern. A kern of exactly 0 turns the font's pair kerning off; any other
+  /// value keeps pair kerning and adds that value after each character. So
+  /// only letterSpacing 0 measures differently from the plain font here.
+  private func segmentAttributes(font: UIFont, desc: [String: Any]) -> [NSAttributedString.Key: Any] {
+    guard letterSpacing(desc) == 0 else { return [.font: font] }
+    return [.font: font, .kern: NSNumber(value: 0)]
+  }
+
+  /// Attributes matching what RN draws, for results that JS returns without
+  /// adding letterSpacing itself (TextKit height, ink bounds, ink advance).
+  private func renderAttributes(font: UIFont, desc: [String: Any]) -> [NSAttributedString.Key: Any] {
+    guard let ls = letterSpacing(desc) else { return [.font: font] }
+    return [.font: font, .kern: NSNumber(value: ls)]
   }
 
   /// Resolve a font descriptor to a UIFont, using the font cache.
@@ -858,8 +906,8 @@ public class ExpoPretext: Module {
   /// Core implementation: segment text and measure each segment's width.
   private func performSegmentAndMeasure(
     text: String,
-    font: UIFont,
-    fontKey: String,
+    attributes: [NSAttributedString.Key: Any],
+    measureKey: String,
     whiteSpace: String,
     locale: String?
   ) -> [String: Any] {
@@ -881,9 +929,9 @@ public class ExpoPretext: Module {
     isWordLike.reserveCapacity(rawSegments.count)
     widths.reserveCapacity(rawSegments.count)
 
-    // Ensure font key has a cache bucket
-    if measureCache[fontKey] == nil {
-      measureCache[fontKey] = [:]
+    // Ensure the measure key has a cache bucket
+    if measureCache[measureKey] == nil {
+      measureCache[measureKey] = [:]
     }
 
     for segment in rawSegments {
@@ -891,22 +939,22 @@ public class ExpoPretext: Module {
       isWordLike.append(classifyWordLike(segment))
 
       // Check measurement cache
-      if var entry = measureCache[fontKey]?[segment] {
+      if var entry = measureCache[measureKey]?[segment] {
         entry.hits += 1
-        measureCache[fontKey]?[segment] = entry
+        measureCache[measureKey]?[segment] = entry
         widths.append(entry.width)
       } else {
         // Measure the segment using CTLine (Core Text) — this is what
         // RN Text's underlying layout engine uses for glyph measurement
-        let attrStr = NSAttributedString(string: segment, attributes: [.font: font])
+        let attrStr = NSAttributedString(string: segment, attributes: attributes)
         let ctLine = CTLineCreateWithAttributedString(attrStr)
         let width = Double(CTLineGetTypographicBounds(ctLine, nil, nil, nil))
-        measureCache[fontKey]?[segment] = CacheEntry(width: width, hits: 1)
+        measureCache[measureKey]?[segment] = CacheEntry(width: width, hits: 1)
         widths.append(width)
 
         // Check if we need LRU eviction
-        if let count = measureCache[fontKey]?.count, count > maxCacheSize {
-          evictLRU(fontKey: fontKey)
+        if let count = measureCache[measureKey]?.count, count > maxCacheSize {
+          evictLRU(measureKey: measureKey)
         }
       }
     }
@@ -1017,8 +1065,8 @@ public class ExpoPretext: Module {
   // MARK: - LRU Eviction
 
   /// Evict the least-hit entries from a font's measure cache, keeping the top maxCacheSize * 0.8 entries.
-  private func evictLRU(fontKey: String) {
-    guard let entries = measureCache[fontKey] else { return }
+  private func evictLRU(measureKey: String) {
+    guard let entries = measureCache[measureKey] else { return }
     let keepCount = Int(Double(maxCacheSize) * 0.8)
     let sorted = entries.sorted { $0.value.hits > $1.value.hits }
     var trimmed: [String: CacheEntry] = [:]
@@ -1027,6 +1075,6 @@ public class ExpoPretext: Module {
       if i >= keepCount { break }
       trimmed[pair.key] = pair.value
     }
-    measureCache[fontKey] = trimmed
+    measureCache[measureKey] = trimmed
   }
 }
