@@ -1,0 +1,43 @@
+name: Build tag
+
+# For every commit pushed to main, push a build/<sha12> tag on a commit that
+# adds the compiled build/ directory on top of it, so git installs need no
+# build step. Pushing a tag doesn't match these triggers, so this never
+# re-runs itself.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Source commit SHA or ref to build (defaults to the selected branch)
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: build + tag
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Build and push tag
+        run: scripts/tag-build.sh origin

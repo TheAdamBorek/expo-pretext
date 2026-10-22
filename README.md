@@ -63,6 +63,16 @@ npx expo install expo-pretext
 
 Requires Expo SDK 52+, React Native 0.76+, New Architecture / Fabric. Reanimated is an optional peer dependency used only by the animation hooks. Expo Go falls back to JS estimates — use a development build for native measurement.
 
+### Installing from git
+
+`main` doesn't contain the compiled `build/` directory, so installing it straight from git gives you a package with no entry point. For every commit pushed to `main`, CI builds it and pushes a `build/<first 12 chars of the commit SHA>` tag pointing at a commit that adds `build/` on top of it. Pin one of those tags instead:
+
+```json
+"expo-pretext": "github:TheAdamBorek/expo-pretext#build/844ea2b1c3d4"
+```
+
+The tagged commit already contains `build/`, so no lifecycle script has to run on install. That matters for installers that skip `prepare` for git dependencies, such as Bazel `rules_js`. Tags are never moved, so a pin always resolves to the same code.
+
 ## Quick start
 
 ### Text height before render
