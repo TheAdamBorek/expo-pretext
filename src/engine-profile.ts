@@ -18,6 +18,12 @@ export type EngineProfile = {
   carryCJKAfterClosingQuote: boolean
   /** Whether keep-all text may break after punctuation-like boundaries. */
   breakKeepAllAfterPunctuation?: boolean
+  /**
+   * Whether runs without spaces (URLs, paths, `and/or`) may break after `/`,
+   * `-`, `?` and `!` where ICU (UAX #14) allows it, as TextKit does. Off, they
+   * stay whole until they overflow, as in Blink.
+   */
+  breakAfterPunctuationInWords?: boolean
   /** Prefer prefix-width accumulation for breakable runs (experimental). */
   preferPrefixWidthsForBreakableRuns: boolean
   /** Break at soft hyphens earlier when close to the line limit (experimental). */
@@ -33,6 +39,7 @@ export const ENGINE_PROFILES = {
     lineFitEpsilon: 0.01,
     carryCJKAfterClosingQuote: true,
     breakKeepAllAfterPunctuation: true,
+    breakAfterPunctuationInWords: true,
     preferPrefixWidthsForBreakableRuns: false,
     preferEarlySoftHyphenBreak: false,
   } as EngineProfile,
