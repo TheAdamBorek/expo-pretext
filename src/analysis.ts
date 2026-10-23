@@ -41,6 +41,7 @@ export type TextAnalysis = { normalized: string, chunks: AnalysisChunk[] } & Mer
 export type AnalysisProfile = {
   carryCJKAfterClosingQuote: boolean
   breakKeepAllAfterPunctuation?: boolean
+  breakAfterPunctuationInWords?: boolean
 }
 
 const collapsibleWhitespaceRunRe = /[ \t\n\r\f]+/g
@@ -626,6 +627,79 @@ function mergeUrlLikeRuns(segmentation: MergedSegmentation): MergedSegmentation 
 
   return {
     len: compactLen,
+    texts,
+    isWordLike,
+    kinds,
+    starts,
+  }
+}
+
+// UAX #14 never breaks before these (CL, CP, EX, IS, SY, HY, QU).
+const noBreakBeforePunctuationChars = new Set([
+  '/', '.', ',', ':', ';', '!', '?', '-', ')', ']', '}', '"', '\'',
+])
+const solidusAndInfixSeparatorChars = new Set(['/', '.', ',', ':', ';'])
+const hebrewLetterRe = /\p{Script=Hebrew}/u
+
+function followsNumber(text: string, punctuationIndex: number): boolean {
+  let i = punctuationIndex - 1
+  while (i >= 0 && solidusAndInfixSeparatorChars.has(text[i]!)) i--
+  return i >= 0 && decimalDigitRe.test(text[i]!)
+}
+
+// Whether ICU (UAX #14), and so iOS TextKit, may break right after the
+// punctuation at `index` in a run without spaces.
+function canBreakAfterPunctuationInWord(text: string, index: number): boolean {
+  const ch = text[index]!
+  if (ch !== '/' && ch !== '-' && ch !== '?' && ch !== '!') return false
+
+  const next = String.fromCodePoint(text.codePointAt(index + 1)!)
+  if (noBreakBeforePunctuationChars.has(next) || combiningMarkRe.test(next)) return false
+
+  if (ch === '/') {
+    // SY × HL (LB21b), and SY × NU inside numbers like 1/2 (LB25).
+    if (hebrewLetterRe.test(next)) return false
+    return !(decimalDigitRe.test(next) && followsNumber(text, index))
+  }
+  if (ch === '-') {
+    // HY × NU (LB25), and no break after a word-initial hyphen (LB20.1).
+    return index > 0 && !decimalDigitRe.test(next)
+  }
+  return true
+}
+
+// Analysis merges URLs, paths and symbol chains like `and/or` into a single
+// segment, matching Blink, which keeps them whole until they overflow. TextKit
+// breaks inside them, e.g. after each `/` of a URL path, so on native split
+// them where it would.
+function splitAtPunctuationBreaksInWords(segmentation: MergedSegmentation): MergedSegmentation {
+  const texts: string[] = []
+  const isWordLike: boolean[] = []
+  const kinds: SegmentBreakKind[] = []
+  const starts: number[] = []
+
+  for (let i = 0; i < segmentation.len; i++) {
+    const text = segmentation.texts[i]!
+    const kind = segmentation.kinds[i]!
+    let pieceStart = 0
+    if (kind === 'text') {
+      for (let j = 0; j < text.length - 1; j++) {
+        if (!canBreakAfterPunctuationInWord(text, j)) continue
+        texts.push(text.slice(pieceStart, j + 1))
+        isWordLike.push(segmentation.isWordLike[i]!)
+        kinds.push(kind)
+        starts.push(segmentation.starts[i]! + pieceStart)
+        pieceStart = j + 1
+      }
+    }
+    texts.push(pieceStart === 0 ? text : text.slice(pieceStart))
+    isWordLike.push(segmentation.isWordLike[i]!)
+    kinds.push(kind)
+    starts.push(segmentation.starts[i]! + pieceStart)
+  }
+
+  return {
+    len: texts.length,
     texts,
     isWordLike,
     kinds,
@@ -1268,11 +1342,14 @@ function buildMergedSegmentation(
     kinds: mergedKinds,
     starts: mergedStarts,
   })
-  const withMergedUrls = carryTrailingForwardStickyAcrossCJKBoundary(
+  const merged = carryTrailingForwardStickyAcrossCJKBoundary(
     mergeNoSpaceWordChains(
       splitHyphenatedNumericRuns(mergeNumericRuns(mergeUrlQueryRuns(mergeUrlLikeRuns(compacted)))),
     ),
   )
+  const withMergedUrls = profile.breakAfterPunctuationInWords
+    ? splitAtPunctuationBreaksInWords(merged)
+    : merged
 
   for (let i = 0; i < withMergedUrls.len - 1; i++) {
     const split = splitLeadingSpaceAndMarks(withMergedUrls.texts[i]!)

@@ -25,6 +25,7 @@ function getAnalysisProfile(): AnalysisProfile {
   return {
     carryCJKAfterClosingQuote: engine.carryCJKAfterClosingQuote,
     breakKeepAllAfterPunctuation: engine.breakKeepAllAfterPunctuation ?? true,
+    breakAfterPunctuationInWords: engine.breakAfterPunctuationInWords ?? false,
   }
 }
 
